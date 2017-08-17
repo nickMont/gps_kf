@@ -115,13 +115,8 @@ void gpsOdom::gpsCallback(const geometry_msgs::PoseStamped::ConstPtr &msg)
 {
   // ROS_INFO("Callback running!");
   static ros::Time t_last_proc = msg->header.stamp;
-  static int counter=0;
-  static ros::Time time_of_last_fix=msg->header.stamp;
-  double lastKnownSpeed=0;
-  counter++;
   double dt = (msg->header.stamp - t_last_proc).toSec();
   t_last_proc = msg->header.stamp;
-  static Eigen::Vector3d z_last(0.0, 0.0, 0.0);
 
   // Kalman filter for getting translational velocity from position measurements
   kf_.processUpdate(dt);
@@ -132,55 +127,10 @@ void gpsOdom::gpsCallback(const geometry_msgs::PoseStamped::ConstPtr &msg)
   const KalmanFilter::Measurement_t meas(msg->pose.position.x, msg->pose.position.y,
                                          msg->pose.position.z);
 
-  static ros::Time t_last_meas = msg->header.stamp; //initialize static variable (basically a scope-limited global)
+  static ros::Time t_last_meas = msg->header.stamp;
   double meas_dt = (msg->header.stamp - t_last_meas).toSec();
-  t_last_meas = msg->header.stamp; //update static variable after being used
-  Eigen::Matrix<double,6,1> xbar=kf_.getState();
-  Eigen::Vector3d z_expected;  //propagating distance forwards based on estimated speed
-  z_expected(0)=z_last(0)+xbar(3)*dt;
-  z_expected(1)=z_last(1)+xbar(4)*dt;
-  z_expected(2)=z_last(2)+xbar(5)*dt;
-  double dt_last_fix=(msg->header.stamp-time_of_last_fix).toSec();
-//  double estDistBySpeed=sqrt(xbar(3)*xbar(3)+xbar(4)*xbar(4)+xbar(5)*xbar(5))*dt_meas;
-  double accel_max=2.0;
-  double dz_hyp_test = sqrt( pow(z_last(0)-meas(0),2)+pow(z_last(1)-meas(1),2)+pow(z_last(2)-meas(2),2) );
-  //maximum expected speed. Normalized by speed rather than pose to handle lost measurement packets
-  double hypothesis_test_threshold=(0.5+accel_max*dt_last_fix*dt_last_fix/2+lastKnownSpeed*dt_last_fix)*meas_dt/0.05;
-  //ROS_INFO("dt:%f:  dz1: %f:  dz2: %f:  dz3: %f",meas_dt,z_last(0)-meas(0),z_last(1)-meas(1),z_last(2)-meas(2));
-  Eigen::Matrix<double, 3, 6> HH;
-  HH.setZero();
-  HH(0, 0) = 1;
-  HH(1, 1) = 1;
-  HH(2, 2) = 1;
-  Eigen::Vector3d resid = meas - HH*xbar;
-  Eigen::Matrix<double,3,3> meas_covmat; //placeholder until I can get the full covariance solution
-  meas_covmat.setZero();
-  meas_covmat(0,0) = 1;
-  meas_covmat(1,1) = 1;
-  meas_covmat(2,2) = 1;
-  Eigen::Matrix<double,6,6> proc_noise_cov;
-  proc_noise_cov = kf_.getProcessNoise();
-  //replace residCost with dz_hyp_test when full covariance solution is available
-  double residCost=resid.transpose()*(meas_covmat+HH*proc_noise_cov*HH.transpose())*resid; //unused until full covariance is available
-
-  if (dz_hyp_test <= hypothesis_test_threshold)
-  {
-    kf_.measurementUpdate(meas, meas_dt);
-    time_of_last_fix=msg->header.stamp;
-    lastKnownSpeed=sqrt(xbar(3)*xbar(3)+xbar(4)*xbar(4)+xbar(5)*xbar(5));
-    if (dz_hyp_test>=hypothesis_test_threshold*2/3)
-    {
-      ROS_INFO("Possible outlier warning at dz=%f", dz_hyp_test);
-    }
-  }
-  else if (counter>1) //bypass first step
-  {
-    ROS_INFO("Outlier of value %f rejected at count %d", dz_hyp_test,counter);
-  }
-  //update static variable AFTER using it
-  z_last(0)=msg->pose.position.x;
-  z_last(1)=msg->pose.position.y;
-  z_last(2)=msg->pose.position.z;
+  t_last_meas = msg->header.stamp;
+  kf_.measurementUpdate(meas, meas_dt);
 
 
   const KalmanFilter::State_t state = kf_.getState();
